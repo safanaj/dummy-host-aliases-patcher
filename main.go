@@ -374,7 +374,7 @@ func (a *hostAliasesDefaulter) Default(ctx context.Context, obj runtime.Object) 
 			continue
 		}
 		rs := &appsv1.ReplicaSet{}
-		l.Info("Retrieving RS", "oref", oref, "orefName", oref.Name)
+		l.Info("Retrieving RS", "oref", oref)
 		if err := a.Get(ctx, client.ObjectKey{Namespace: pod.GetNamespace(), Name: oref.Name}, rs); err != nil {
 			l.Error(err, "Failed to get owner ReplicaSet", "ns", pod.GetNamespace(), "orefName", oref.Name)
 			return err
