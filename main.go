@@ -374,6 +374,7 @@ func (a *hostAliasesDefaulter) Default(ctx context.Context, obj runtime.Object) 
 			continue
 		}
 		rs := &appsv1.ReplicaSet{}
+		l.Info("Retrieving RS", "oref", oref, "orefName", oref.Name)
 		if err := a.Get(ctx, client.ObjectKey{Namespace: pod.GetNamespace(), Name: oref.Name}, rs); err != nil {
 			l.Error(err, "Failed to get owner ReplicaSet", "ns", pod.GetNamespace(), "orefName", oref.Name)
 			return err
@@ -383,6 +384,7 @@ func (a *hostAliasesDefaulter) Default(ctx context.Context, obj runtime.Object) 
 				l.Info("Ignoring non controlled replicaSet?", "ns", rs.GetNamespace(), "name", rs.Name, "oref", oref)
 				continue
 			}
+			l.Info("Check RS Owner", "oref", oref, "orefName", oref.Name)
 			if _, ok := tgtNames[oref.Name]; !ok {
 				l.Info("Ignoring wrong named replicaSet owner", "ns", rs.GetNamespace(), "nmae", rs.GetName(), "oref", oref)
 				continue
