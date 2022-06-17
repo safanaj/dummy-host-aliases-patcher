@@ -340,6 +340,8 @@ func (a *hostAliasesDefaulter) InjectClient(c client.Client) error {
 func (a *hostAliasesDefaulter) Default(ctx context.Context, obj runtime.Object) error {
 	l := logf.FromContext(ctx)
 	pod, isPod := obj.(*corev1.Pod)
+
+	l.Info("Processing ... ", "pod", pod, "isPod", isPod, "obj", obj)
 	if !isPod {
 		return fmt.Errorf("expect object to be a %T instead of %T", pod, obj)
 	}
