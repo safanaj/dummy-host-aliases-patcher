@@ -402,15 +402,25 @@ func (a *hostAliasesDefaulter) Default(ctx context.Context, obj runtime.Object) 
 	}
 
 	svcClusterIpMu.RLock()
+	svcIp := svcClusterIp
 	defer svcClusterIpMu.RUnlock()
+	if svcIp == "" {
+		s := &corev1.Service{}
+		err := a.Get(ctx, client.ObjectKey{Namespace: svcNamespace, Name: svcName}, s)
+		if err != nil {
+			l.Error(err, "Failed to get service", "name", svcName, "ns", svcNamespace)
+			return err
+		}
+		svcIp = s.Spec.ClusterIP
+	}
 
-	if anyPodsNeedsForPatch(svcClusterIp, dnsNames, []*corev1.Pod{pod}) {
-		pod.Spec.HostAliases = append(pod.Spec.HostAliases, corev1.HostAlias{IP: svcClusterIp, Hostnames: dnsNames})
+	if anyPodsNeedsForPatch(svcIp, dnsNames, []*corev1.Pod{pod}) {
+		pod.Spec.HostAliases = append(pod.Spec.HostAliases, corev1.HostAlias{IP: svcIp, Hostnames: dnsNames})
 		l.Info("Patching pod", "ns", pod.GetNamespace(), "name", pod.GetName(), "hostAliases", pod.Spec.HostAliases,
-			"dnsNames", dnsNames, "svcIp", svcClusterIp, "targets", tgtDeployments)
+			"dnsNames", dnsNames, "svcIp", svcIp, "targets", tgtDeployments, "svcClusterIp", svcClusterIp)
 	} else {
 		l.Info("Already up-to-date pod", "ns", pod.GetNamespace(), "name", pod.GetName(), "hostAliases", pod.Spec.HostAliases,
-			"dnsNames", dnsNames, "svcIp", svcClusterIp, "targets", tgtDeployments)
+			"dnsNames", dnsNames, "svcIp", svcIp, "targets", tgtDeployments, "svcClusterIp", svcClusterIp)
 	}
 
 	return nil
