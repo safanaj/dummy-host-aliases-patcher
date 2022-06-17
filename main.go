@@ -339,7 +339,11 @@ func (a *hostAliasesDefaulter) InjectClient(c client.Client) error {
 
 func (a *hostAliasesDefaulter) Default(ctx context.Context, obj runtime.Object) error {
 	l := logf.FromContext(ctx)
-	pod, _ := obj.(*corev1.Pod)
+	pod, isPod := obj.(*corev1.Pod)
+	if !isPod {
+		return fmt.Errorf("expect object to be a %T instead of %T", pod, obj)
+	}
+
 	if pod.GetNamespace() != tgtNamespace {
 		l.Info("Ignoring pod in wrong namespace", "ns", pod.GetNamespace(), "name", pod.GetName(), "tgtNamespace", tgtNamespace)
 		return nil
