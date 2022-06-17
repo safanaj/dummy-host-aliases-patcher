@@ -1,0 +1,10 @@
+FROM golang:1.18.2-bullseye AS builder
+RUN go version
+ARG component
+
+ADD . /gobuild
+WORKDIR /gobuild
+RUN make clean-all verify-deps static
+RUN mv /gobuild/$component /
+WORKDIR /
+RUN rm -rf /gobuild
