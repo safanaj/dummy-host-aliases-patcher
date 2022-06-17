@@ -17,6 +17,7 @@ import (
 	"k8s.io/apimachinery/pkg/runtime"
 
 	"sigs.k8s.io/controller-runtime/pkg/builder"
+	"sigs.k8s.io/controller-runtime/pkg/cache"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/client/config"
 	"sigs.k8s.io/controller-runtime/pkg/event"
@@ -27,6 +28,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/manager/signals"
 	"sigs.k8s.io/controller-runtime/pkg/predicate"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
+	"sigs.k8s.io/controller-runtime/pkg/runtime/inject"
 )
 
 var (
@@ -312,11 +314,13 @@ func main() {
 			return reconcile.Result{}, nil
 		}))
 
+	wh := &hostAliasesDefaulter{}
 	err = builder.
 		WebhookManagedBy(mgr).
 		For(&corev1.Pod{}).
-		WithDefaulter(&hostAliasesDefaulter{}).
+		WithDefaulter(wh).
 		Complete()
+	inject.CacheInto(mgr.GetCache(), wh)
 
 	if doInitialReconciliation {
 		doInitialReconcile(context.TODO(), mgr.GetClient())
@@ -329,11 +333,11 @@ func main() {
 }
 
 type hostAliasesDefaulter struct {
-	client.Client
+	cache.Cache
 }
 
-func (a *hostAliasesDefaulter) InjectClient(c client.Client) error {
-	a.Client = c
+func (a *hostAliasesDefaulter) InjectCache(c cache.Cache) error {
+	a.Cache = c
 	return nil
 }
 
