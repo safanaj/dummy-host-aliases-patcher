@@ -28,7 +28,6 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/manager/signals"
 	"sigs.k8s.io/controller-runtime/pkg/predicate"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
-	"sigs.k8s.io/controller-runtime/pkg/runtime/inject"
 )
 
 var (
@@ -308,19 +307,19 @@ func main() {
 			svcClusterIpMu.Lock()
 			defer svcClusterIpMu.Unlock()
 			svcClusterIp = svc.Spec.ClusterIP
+			l.Info("Service ClusterIP (cache) updated", "svcClusterIp", svcClusterIp)
 			if needsNotify {
 				// todo: notify that IP is changed/set
+				l.Info("Service ClusterIP (cache) update needs notify")
 			}
 			return reconcile.Result{}, nil
 		}))
 
-	wh := &hostAliasesDefaulter{}
 	err = builder.
 		WebhookManagedBy(mgr).
 		For(&corev1.Pod{}).
-		WithDefaulter(wh).
+		WithDefaulter(&hostAliasesDefaulter{Cache: mgr.GetCache()}).
 		Complete()
-	inject.CacheInto(mgr.GetCache(), wh)
 
 	if doInitialReconciliation {
 		doInitialReconcile(context.TODO(), mgr.GetClient())
