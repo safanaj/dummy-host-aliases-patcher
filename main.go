@@ -337,7 +337,7 @@ func main() {
 			svcClusterIpMu.Lock()
 			defer svcClusterIpMu.Unlock()
 			svcClusterIp = svc.Spec.ClusterIP
-			l.V(2).Info("Service ClusterIP (cache) updated", "svcClusterIp", svcClusterIp, "name", svc.Name())
+			l.V(2).Info("Service ClusterIP (cache) updated", "svcClusterIp", svcClusterIp, "name", svc.GetName())
 			if needsNotify {
 				// todo: notify that IP is changed/set
 				l.V(2).Info("Service ClusterIP (cache) update needs notify")
