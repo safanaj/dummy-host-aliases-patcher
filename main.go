@@ -404,6 +404,19 @@ func main() {
 			if needsNotify {
 				// todo: notify that IP is changed/set
 				l.V(2).Info("Service ClusterIP (cache) update needs notify")
+
+				// for _, tgtName := range tgtDeployments {
+				// 	d := &appsv1.Deployment{}
+				// 	if err := cl.Get(ctx, client.ObjectKey{Namespace: tgtNamespace, Name: tgtName}, d); err != nil {
+				// 		// just skip
+				// 		continue
+				// 	}
+				// 	// TODO: prepare and submit patch
+				// 	// if d.ObjectMeta.Annotations == nil {
+				// 	// 	d.ObjectMeta.Annotations = make(map[string]string)
+				// 	// }
+				// 	// d.ObjectMeta.Annotations["host-aliases-patcher"] = "needed"
+				// }
 			}
 			return reconcile.Result{}, nil
 		}))
@@ -619,7 +632,7 @@ func (a *hostAliasesDefaulter) processRs(ctx context.Context, rs *appsv1.Replica
 }
 
 func (a *hostAliasesDefaulter) processDeploy(ctx context.Context, d *appsv1.Deployment) error {
-	l := logf.FromContext(ctx).WithName("defaulterRs")
+	l := logf.FromContext(ctx).WithName("defaulterDeploy")
 
 	l.V(3).Info("Processing Deployment", "ns", d.GetNamespace(), "name", d.GetName())
 	if d.GetNamespace() != tgtNamespace {
@@ -664,6 +677,8 @@ func (a *hostAliasesDefaulter) processDeploy(ctx context.Context, d *appsv1.Depl
 		}
 		d.Spec.Template.ObjectMeta.Annotations["host-aliases-patched"] = "dummy"
 
+		delete(d.ObjectMeta.Annotations, "host-aliases-patcher")
+		delete(d.Spec.Template.ObjectMeta.Annotations, "host-aliases-patcher")
 	} else {
 		l.Info("Already up-to-date Deployment", "ns", d.GetNamespace(), "name", d.GetName(), "hostAliases", d.Spec.Template.Spec.HostAliases,
 			"dnsNames", dnsNames, "svcIp", svcIp, "targets", tgtDeployments, "svcClusterIp", svcClusterIp)
