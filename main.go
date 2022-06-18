@@ -283,14 +283,14 @@ func main() {
 	// initialize Service Cluster IP cache
 	{
 		svc := &corev1.Service{}
-		err := mgr.GetClient().Get(mainCtx, client.ObjectKey{Namespace: svcNamespace, Name: svcName}, svc)
+		err := mgr.GetAPIReader().Get(mainCtx, client.ObjectKey{Namespace: svcNamespace, Name: svcName}, svc)
 		if err != nil {
 			log.Error(err, "Failed to get service", "name", svcName, "ns", svcNamespace)
 		}
 		svcClusterIpMu.Lock()
 		svcClusterIp = svc.Spec.ClusterIP
 		svcClusterIpMu.Unlock()
-		log.V(2).Info("Service Cluster IP initialized", "svc", svc, "ip", svcClusterIp)
+		log.V(2).Info("Service Cluster IP initialized", "name", svc.GetName(), "ip", svcClusterIp)
 	}
 
 	err = builder.
@@ -301,11 +301,11 @@ func main() {
 		For(&appsv1.Deployment{}).
 		WithEventFilter(predicate.And(predicate.ResourceVersionChangedPredicate{}, predicate.Funcs{
 			CreateFunc: func(evt event.CreateEvent) bool {
-				log.V(3).Info("Event filtering (create)", "evt", evt, "obj", evt.Object)
+				log.V(3).Info("Event filtering (create)", "evt", evt)
 				return isWatchedService(evt.Object)
 			},
 			UpdateFunc: func(evt event.UpdateEvent) bool {
-				log.V(3).Info("Event filtering (update)", "evt", evt, "obj", evt.ObjectNew)
+				log.V(3).Info("Event filtering (update)", "evt", evt)
 				return isWatchedService(evt.ObjectNew)
 			},
 		})).
@@ -322,7 +322,7 @@ func main() {
 				return reconcile.Result{}, err
 			}
 			if !isWatchedService(svc) {
-				l.Info("Avoid reconciling other service", "svc", svc)
+				l.Info("Avoid reconciling other service", "name", svc.GetName())
 				return reconcile.Result{}, nil
 			}
 
@@ -337,7 +337,7 @@ func main() {
 			svcClusterIpMu.Lock()
 			defer svcClusterIpMu.Unlock()
 			svcClusterIp = svc.Spec.ClusterIP
-			l.V(2).Info("Service ClusterIP (cache) updated", "svcClusterIp", svcClusterIp, "svc", svc)
+			l.V(2).Info("Service ClusterIP (cache) updated", "svcClusterIp", svcClusterIp, "name", svc.Name())
 			if needsNotify {
 				// todo: notify that IP is changed/set
 				l.V(2).Info("Service ClusterIP (cache) update needs notify")
@@ -374,7 +374,8 @@ func (a *hostAliasesDefaulter) Default(ctx context.Context, obj runtime.Object) 
 	l := logf.FromContext(ctx)
 	pod, isPod := obj.(*corev1.Pod)
 
-	l.V(3).Info("Processing ... ", "pod", pod, "isPod", isPod, "obj", obj)
+	l.V(3).Info("Processing ... ", "pod", pod.GetName(), "isPod", isPod)
+	l.V(4).Info("Details ... ", "obj", obj)
 	if !isPod {
 		return fmt.Errorf("expect object to be a %T instead of %T", pod, obj)
 	}
@@ -441,7 +442,7 @@ func (a *hostAliasesDefaulter) Default(ctx context.Context, obj runtime.Object) 
 			l.Error(err, "Failed to get service", "name", svcName, "ns", svcNamespace)
 			return err
 		}
-		l.Info("Update Service Cluster IP cache", "svc", s, "ip", s.Spec.ClusterIP)
+		l.Info("Update Service Cluster IP cache", "name", s.GetName(), "ip", s.Spec.ClusterIP)
 		svcIp = s.Spec.ClusterIP
 	}
 
