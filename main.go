@@ -71,6 +71,31 @@ func isWatchedService(o client.Object) bool {
 		objk.Name == svcName)
 }
 
+func findActiveReplicaSetOnDeployment(
+	ctx context.Context,
+	depl *appsv1.Deployment,
+) (string, string) {
+	rsName := ""
+	pthVal := ""
+	re := regexp.MustCompile(fmt.Sprintf("ReplicaSet \"%s-([[:alnum:]]+)\" has successfully progressed.", depl.GetName()))
+
+	for _, cond := range depl.Status.Conditions {
+		if !(cond.Reason != "NewReplicaSetAvailable" &&
+			cond.Status != corev1.ConditionTrue &&
+			cond.Type != appsv1.DeploymentProgressing) {
+			continue
+		}
+		m := re.FindStringSubmatch(cond.Message)
+		if len(m) < 2 {
+			continue
+		}
+		rsName = fmt.Sprintf("%s-%s", depl.GetName(), m[1])
+		pthVal = m[1]
+		break
+	}
+	return rsName, pthVal
+}
+
 func findPodsAndControllers(
 	ctx context.Context,
 	cl client.Client,
@@ -84,24 +109,26 @@ func findPodsAndControllers(
 		return nil, nil, nil, err
 	}
 
-	rsName := ""
-	pthVal := ""
-	re := regexp.MustCompile(fmt.Sprintf("ReplicaSet \"%s-([[:alnum:]]+)\" has successfully progressed.", deplKey.Name))
+	rsName, pthVal := findActiveReplicaSetOnDeployment(ctx, depl)
 
-	for _, cond := range depl.Status.Conditions {
-		if !(cond.Reason != "NewReplicaSetAvailable" &&
-			cond.Status != corev1.ConditionTrue &&
-			cond.Type != appsv1.DeploymentProgressing) {
-			continue
-		}
-		m := re.FindStringSubmatch(cond.Message)
-		if len(m) < 2 {
-			continue
-		}
-		rsName = fmt.Sprintf("%s-%s", deplKey.Name, m[1])
-		pthVal = m[1]
-		break
-	}
+	// rsName := ""
+	// pthVal := ""
+	// re := regexp.MustCompile(fmt.Sprintf("ReplicaSet \"%s-([[:alnum:]]+)\" has successfully progressed.", deplKey.Name))
+
+	// for _, cond := range depl.Status.Conditions {
+	// 	if !(cond.Reason != "NewReplicaSetAvailable" &&
+	// 		cond.Status != corev1.ConditionTrue &&
+	// 		cond.Type != appsv1.DeploymentProgressing) {
+	// 		continue
+	// 	}
+	// 	m := re.FindStringSubmatch(cond.Message)
+	// 	if len(m) < 2 {
+	// 		continue
+	// 	}
+	// 	rsName = fmt.Sprintf("%s-%s", deplKey.Name, m[1])
+	// 	pthVal = m[1]
+	// 	break
+	// }
 
 	if rsName == "" {
 		return depl, nil, nil, nil
@@ -392,6 +419,11 @@ func main() {
 		For(&appsv1.ReplicaSet{}).
 		WithDefaulter(wh).
 		Complete()
+	err = builder.
+		WebhookManagedBy(mgr).
+		For(&appsv1.Deployment{}).
+		WithDefaulter(wh).
+		Complete()
 
 	if doInitialReconciliation {
 		doInitialReconcile(context.TODO(), mgr.GetClient())
@@ -420,6 +452,8 @@ func (a *hostAliasesDefaulter) Default(ctx context.Context, obj runtime.Object) 
 		return a.processPod(ctx, objT)
 	case *appsv1.ReplicaSet:
 		return a.processRs(ctx, objT)
+	case *appsv1.Deployment:
+		return a.processDeploy(ctx, objT)
 	default:
 		return fmt.Errorf("expect object to be a %T or %T instead of %T", &corev1.Pod{}, &appsv1.ReplicaSet{}, obj)
 	}
@@ -530,7 +564,20 @@ func (a *hostAliasesDefaulter) processRs(ctx context.Context, rs *appsv1.Replica
 		}
 		l.V(3).Info("Check RS Owner", "oref", oref, "orefName", oref.Name)
 		if _, ok := tgtNames[oref.Name]; !ok {
-			l.Info("Ignoring wrong named replicaSet owner", "ns", rs.GetNamespace(), "nmae", rs.GetName(), "oref", oref)
+			l.Info("Ignoring wrong named replicaSet owner", "ns", rs.GetNamespace(), "name", rs.GetName(), "oref", oref)
+			continue
+		}
+
+		// check if this is the "active" replicaSet on the deployment
+		depl := &appsv1.Deployment{}
+		l.V(3).Info("Retrieving Deployment", "oref", oref)
+		if err := a.Get(ctx, client.ObjectKey{Namespace: rs.GetNamespace(), Name: oref.Name}, depl); err != nil {
+			l.Error(err, "Failed to get owner ReplicaSet", "ns", rs.GetNamespace(), "orefName", oref.Name)
+			return err
+		}
+		rsName, _ := findActiveReplicaSetOnDeployment(ctx, depl)
+		if rsName != rs.GetName() {
+			l.Info("Ignoring non active replicaSet", "ns", rs.GetNamespace(), "name", rs.GetName(), "active", rsName)
 			continue
 		}
 		found = true
@@ -538,6 +585,11 @@ func (a *hostAliasesDefaulter) processRs(ctx context.Context, rs *appsv1.Replica
 
 	if !found {
 		l.V(2).Info("Ignoring rs", "ns", rs.GetNamespace(), "name", rs.GetName())
+		return nil
+	}
+
+	if rs.Status.FullyLabeledReplicas > 0 {
+		l.V(2).Info("Ignoring rs with no pods", "ns", rs.GetNamespace(), "name", rs.GetName())
 		return nil
 	}
 
@@ -561,6 +613,59 @@ func (a *hostAliasesDefaulter) processRs(ctx context.Context, rs *appsv1.Replica
 			"dnsNames", dnsNames, "svcIp", svcIp, "targets", tgtDeployments, "svcClusterIp", svcClusterIp)
 	} else {
 		l.Info("Already up-to-date rs", "ns", rs.GetNamespace(), "name", rs.GetName(), "hostAliases", rs.Spec.Template.Spec.HostAliases,
+			"dnsNames", dnsNames, "svcIp", svcIp, "targets", tgtDeployments, "svcClusterIp", svcClusterIp)
+	}
+	return nil
+}
+
+func (a *hostAliasesDefaulter) processDeploy(ctx context.Context, d *appsv1.Deployment) error {
+	l := logf.FromContext(ctx).WithName("defaulterRs")
+
+	l.V(3).Info("Processing Deployment", "ns", d.GetNamespace(), "name", d.GetName())
+	if d.GetNamespace() != tgtNamespace {
+		l.V(2).Info("Ignoring Deployment in wrong namespace", "ns", d.GetNamespace(), "name", d.GetName(), "tgtNamespace", tgtNamespace)
+		return nil
+	}
+
+	tgtNames := make(map[string]struct{})
+	for _, tgtName := range tgtDeployments {
+		tgtNames[tgtName] = struct{}{}
+	}
+	if _, ok := tgtNames[d.GetName()]; !ok {
+		l.V(2).Info("Ignoring Deployment", "ns", d.GetNamespace(), "name", d.GetName(), "tgtDeployments", tgtDeployments)
+		return nil
+	}
+
+	svcClusterIpMu.RLock()
+	svcIp := svcClusterIp
+	svcClusterIpMu.RUnlock()
+	if svcIp == "" {
+		s := &corev1.Service{}
+		err := a.Get(ctx, client.ObjectKey{Namespace: svcNamespace, Name: svcName}, s)
+		if err != nil {
+			l.Error(err, "Failed to get service", "name", svcName, "ns", svcNamespace)
+			return err
+		}
+		l.Info("Update Service Cluster IP cache", "name", s.GetName(), "ip", s.Spec.ClusterIP)
+		svcIp = s.Spec.ClusterIP
+	}
+
+	if hostAliasesNeedsPatch(ctx, svcIp, dnsNames, d.Spec.Template.Spec.HostAliases) {
+		d.Spec.Template.Spec.HostAliases = append(d.Spec.Template.Spec.HostAliases, corev1.HostAlias{IP: svcIp, Hostnames: dnsNames})
+		l.Info("Patching Deployment", "ns", d.GetNamespace(), "name", d.GetName(), "hostAliases", d.Spec.Template.Spec.HostAliases,
+			"dnsNames", dnsNames, "svcIp", svcIp, "targets", tgtDeployments, "svcClusterIp", svcClusterIp)
+		if d.ObjectMeta.Annotations == nil {
+			d.ObjectMeta.Annotations = make(map[string]string)
+		}
+		d.ObjectMeta.Annotations["host-aliases-patched"] = "dummy"
+
+		if d.Spec.Template.ObjectMeta.Annotations == nil {
+			d.Spec.Template.ObjectMeta.Annotations = make(map[string]string)
+		}
+		d.Spec.Template.ObjectMeta.Annotations["host-aliases-patched"] = "dummy"
+
+	} else {
+		l.Info("Already up-to-date Deployment", "ns", d.GetNamespace(), "name", d.GetName(), "hostAliases", d.Spec.Template.Spec.HostAliases,
 			"dnsNames", dnsNames, "svcIp", svcIp, "targets", tgtDeployments, "svcClusterIp", svcClusterIp)
 	}
 	return nil
