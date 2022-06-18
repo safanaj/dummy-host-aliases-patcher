@@ -381,10 +381,16 @@ func main() {
 			return reconcile.Result{}, nil
 		}))
 
+	wh := &hostAliasesDefaulter{Cache: mgr.GetCache()}
 	err = builder.
 		WebhookManagedBy(mgr).
 		For(&corev1.Pod{}).
-		WithDefaulter(&hostAliasesDefaulter{Cache: mgr.GetCache()}).
+		WithDefaulter(wh).
+		Complete()
+	err = builder.
+		WebhookManagedBy(mgr).
+		For(&appsv1.ReplicaSet{}).
+		WithDefaulter(wh).
 		Complete()
 
 	if doInitialReconciliation {
