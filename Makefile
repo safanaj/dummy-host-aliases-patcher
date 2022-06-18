@@ -65,5 +65,6 @@ docker-build-in-docker: .dockerignore
 	    sed \
 			-e 's,ADD $$component /,COPY --from=builder /$$component /,' \
 			-e 's,CMD .*$$,CMD ["/$(COMPONENT)"],' \
+			-e 's,ENTRYPOINT .*$$,ENTRYPOINT ["/$(COMPONENT)"],' \
 		>> Dockerfile.build-in-docker
 	docker build -t ${DOCKER_IMAGE} -f Dockerfile.build-in-docker --build-arg=component=$(COMPONENT) .
