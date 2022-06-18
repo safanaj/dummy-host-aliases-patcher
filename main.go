@@ -136,8 +136,8 @@ func findPodsAndControllers(
 	return depl, rs, pods, nil
 }
 
-func anyPodsNeedsForPatch(svcClusterIp string, dnsNames []string, pods []*corev1.Pod) bool {
-	if len(dnsNames) == 0 {
+func anyPodsNeedsForPatch(svcIp string, dnsNames []string, pods []*corev1.Pod) bool {
+	if len(dnsNames) == 0 || svcIp == "" {
 		return false
 	}
 
@@ -147,7 +147,7 @@ func anyPodsNeedsForPatch(svcClusterIp string, dnsNames []string, pods []*corev1
 		}
 		found := false
 		for _, hostAlias := range pod.Spec.HostAliases {
-			if hostAlias.IP != svcClusterIp {
+			if hostAlias.IP != svcIp {
 				continue
 			}
 			hnMap := make(map[string]struct{})
@@ -156,6 +156,7 @@ func anyPodsNeedsForPatch(svcClusterIp string, dnsNames []string, pods []*corev1
 			}
 			for _, n := range dnsNames {
 				if _, ok := hnMap[n]; !ok {
+					found = false
 					break
 				}
 				found = true
@@ -414,6 +415,7 @@ func (a *hostAliasesDefaulter) Default(ctx context.Context, obj runtime.Object) 
 		svcIp = s.Spec.ClusterIP
 	}
 
+	l.Info("Checking pod for host aliases", "ns", pod.GetNamespace(), "name", pod.GetName(), "hostAliases", pod.Spec.HostAliases)
 	if anyPodsNeedsForPatch(svcIp, dnsNames, []*corev1.Pod{pod}) {
 		pod.Spec.HostAliases = append(pod.Spec.HostAliases, corev1.HostAlias{IP: svcIp, Hostnames: dnsNames})
 		l.Info("Patching pod", "ns", pod.GetNamespace(), "name", pod.GetName(), "hostAliases", pod.Spec.HostAliases,
