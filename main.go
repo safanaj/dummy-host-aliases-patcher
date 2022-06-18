@@ -188,7 +188,7 @@ func hostAliasesNeedsPatch(ctx context.Context, svcIp string, dnsNames []string,
 }
 
 func doInitialReconcile(ctx context.Context, cl client.Client, api client.Reader) {
-	l := logf.FromContext(ctx)
+	l := logf.FromContext(ctx).WithName("initialReconciler")
 
 	svc := &corev1.Service{}
 	err := api.Get(ctx, client.ObjectKey{Namespace: svcNamespace, Name: svcName}, svc)
