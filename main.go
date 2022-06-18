@@ -107,7 +107,7 @@ func findActiveReplicaSetOnDeployment(
 
 func findPodsAndControllers(
 	ctx context.Context,
-	cl client.Client,
+	cl client.Reader,
 	deplKey client.ObjectKey,
 ) (*appsv1.Deployment, *appsv1.ReplicaSet, []*corev1.Pod, error) {
 	l := logf.FromContext(ctx).WithName("findPodsAndControllers")
@@ -187,11 +187,11 @@ func hostAliasesNeedsPatch(ctx context.Context, svcIp string, dnsNames []string,
 	return false
 }
 
-func doInitialReconcile(ctx context.Context, cl client.Client) {
+func doInitialReconcile(ctx context.Context, cl client.Client, api client.Reader) {
 	l := logf.FromContext(ctx)
 
 	svc := &corev1.Service{}
-	err := cl.Get(ctx, client.ObjectKey{Namespace: svcNamespace, Name: svcName}, svc)
+	err := api.Get(ctx, client.ObjectKey{Namespace: svcNamespace, Name: svcName}, svc)
 	if err != nil {
 		l.Error(err, "Failed to get service", "name", svcName, "ns", svcNamespace)
 		return
@@ -204,7 +204,7 @@ func doInitialReconcile(ctx context.Context, cl client.Client) {
 	})
 
 	for _, tgtName := range tgtDeployments {
-		depl, rs, pods, err := findPodsAndControllers(ctx, cl, client.ObjectKey{Namespace: tgtNamespace, Name: tgtName})
+		depl, rs, pods, err := findPodsAndControllers(ctx, api, client.ObjectKey{Namespace: tgtNamespace, Name: tgtName})
 		if err != nil {
 			l.Error(err, "Failed to get target deployment", "name", tgtName, "ns", tgtNamespace)
 			continue
@@ -392,7 +392,7 @@ func main() {
 		Complete()
 
 	if doInitialReconciliation {
-		doInitialReconcile(context.TODO(), mgr.GetClient())
+		doInitialReconcile(mainCtx, mgr.GetClient(), mgr.GetAPIReader())
 	}
 
 	if err := mgr.Start(mainCtx); err != nil {
