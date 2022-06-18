@@ -136,6 +136,40 @@ func findPodsAndControllers(
 	return depl, rs, pods, nil
 }
 
+func hostAliasesNeedsPatch(ctx context.Context, svcIp string, dnsNames []string, hostAliases []corev1.HostAlias) bool {
+	l := logf.FromContext(ctx).WithName("needs-patch")
+	if len(dnsNames) == 0 || svcIp == "" {
+		l.V(3).Info("Skipping check", "dnsNames", dnsNames, "svcIp", svcIp)
+		return false
+	}
+	if len(hostAliases) == 0 {
+		l.V(3).Info("Needs patch because no hostAliases")
+		return true
+	}
+	found := false
+	for _, hostAlias := range hostAliases {
+		if hostAlias.IP != svcIp {
+			continue
+		}
+		hnMap := make(map[string]struct{})
+		for _, hn := range hostAlias.Hostnames {
+			hnMap[hn] = struct{}{}
+		}
+		for _, n := range dnsNames {
+			if _, ok := hnMap[n]; !ok {
+				found = false
+				break
+			}
+			l.V(4).Info("No patch needed, because all hostAliases were found")
+			found = true
+		}
+	}
+	if !found {
+		return true
+	}
+	return false
+}
+
 func anyPodsNeedsForPatch(ctx context.Context, svcIp string, dnsNames []string, pods []*corev1.Pod) bool {
 	l := logf.FromContext(ctx).WithName("needs-patch")
 
@@ -145,31 +179,33 @@ func anyPodsNeedsForPatch(ctx context.Context, svcIp string, dnsNames []string, 
 	}
 
 	for _, pod := range pods {
-		if len(pod.Spec.HostAliases) == 0 {
-			l.V(3).Info("Needs patch because no hostAliases", "pod", pod)
-			return true
-		}
-		found := false
-		for _, hostAlias := range pod.Spec.HostAliases {
-			if hostAlias.IP != svcIp {
-				continue
-			}
-			hnMap := make(map[string]struct{})
-			for _, hn := range hostAlias.Hostnames {
-				hnMap[hn] = struct{}{}
-			}
-			for _, n := range dnsNames {
-				if _, ok := hnMap[n]; !ok {
-					found = false
-					break
-				}
-				l.V(4).Info("No patch needed, because no found all hostAliases")
-				found = true
-			}
-		}
-		if !found {
-			return true
-		}
+		return hostAliasesNeedsPatch(ctx, svcIp, dnsNames, pod.Spec.HostAliases)
+
+		// if len(pod.Spec.HostAliases) == 0 {
+		// 	l.V(3).Info("Needs patch because no hostAliases", "pod", pod)
+		// 	return true
+		// }
+		// found := false
+		// for _, hostAlias := range pod.Spec.HostAliases {
+		// 	if hostAlias.IP != svcIp {
+		// 		continue
+		// 	}
+		// 	hnMap := make(map[string]struct{})
+		// 	for _, hn := range hostAlias.Hostnames {
+		// 		hnMap[hn] = struct{}{}
+		// 	}
+		// 	for _, n := range dnsNames {
+		// 		if _, ok := hnMap[n]; !ok {
+		// 			found = false
+		// 			break
+		// 		}
+		// 		l.V(4).Info("No patch needed, because no found all hostAliases")
+		// 		found = true
+		// 	}
+		// }
+		// if !found {
+		// 	return true
+		// }
 	}
 	return false
 }
@@ -371,15 +407,22 @@ func (a *hostAliasesDefaulter) InjectCache(c cache.Cache) error {
 }
 
 func (a *hostAliasesDefaulter) Default(ctx context.Context, obj runtime.Object) error {
-	l := logf.FromContext(ctx)
-	pod, isPod := obj.(*corev1.Pod)
-
-	l.V(3).Info("Processing ... ", "pod", pod.GetName(), "isPod", isPod)
+	l := logf.FromContext(ctx).WithName("defaulter")
 	l.V(4).Info("Details ... ", "obj", obj)
-	if !isPod {
-		return fmt.Errorf("expect object to be a %T instead of %T", pod, obj)
+	switch objT := obj.(type) {
+	case *corev1.Pod:
+		return a.processPod(ctx, objT)
+	case *appsv1.ReplicaSet:
+		return a.processRs(ctx, objT)
+	default:
+		return fmt.Errorf("expect object to be a %T or %T instead of %T", &corev1.Pod{}, &appsv1.ReplicaSet{}, obj)
 	}
+}
 
+func (a *hostAliasesDefaulter) processPod(ctx context.Context, pod *corev1.Pod) error {
+	l := logf.FromContext(ctx).WithName("defaulterPod")
+
+	l.V(3).Info("Processing pod", "ns", pod.GetNamespace(), "name", pod.GetName())
 	if pod.GetNamespace() != tgtNamespace {
 		l.V(2).Info("Ignoring pod in wrong namespace", "ns", pod.GetNamespace(), "name", pod.GetName(), "tgtNamespace", tgtNamespace)
 		return nil
@@ -434,7 +477,7 @@ func (a *hostAliasesDefaulter) Default(ctx context.Context, obj runtime.Object) 
 
 	svcClusterIpMu.RLock()
 	svcIp := svcClusterIp
-	defer svcClusterIpMu.RUnlock()
+	svcClusterIpMu.RUnlock()
 	if svcIp == "" {
 		s := &corev1.Service{}
 		err := a.Get(ctx, client.ObjectKey{Namespace: svcNamespace, Name: svcName}, s)
@@ -456,5 +499,63 @@ func (a *hostAliasesDefaulter) Default(ctx context.Context, obj runtime.Object) 
 			"dnsNames", dnsNames, "svcIp", svcIp, "targets", tgtDeployments, "svcClusterIp", svcClusterIp)
 	}
 
+	return nil
+}
+
+func (a *hostAliasesDefaulter) processRs(ctx context.Context, rs *appsv1.ReplicaSet) error {
+	l := logf.FromContext(ctx).WithName("defaulterRs")
+
+	l.V(3).Info("Processing replicaSet", "ns", rs.GetNamespace(), "name", rs.GetName())
+	if rs.GetNamespace() != tgtNamespace {
+		l.V(2).Info("Ignoring rs in wrong namespace", "ns", rs.GetNamespace(), "name", rs.GetName(), "tgtNamespace", tgtNamespace)
+		return nil
+	}
+
+	tgtNames := make(map[string]struct{})
+	for _, tgtName := range tgtDeployments {
+		tgtNames[tgtName] = struct{}{}
+	}
+
+	found := false
+	for _, oref := range rs.GetOwnerReferences() {
+		if oref.Controller != nil && !*oref.Controller {
+			l.Info("Ignoring non controlled replicaSet?", "ns", rs.GetNamespace(), "name", rs.Name, "oref", oref)
+			continue
+		}
+		l.V(3).Info("Check RS Owner", "oref", oref, "orefName", oref.Name)
+		if _, ok := tgtNames[oref.Name]; !ok {
+			l.Info("Ignoring wrong named replicaSet owner", "ns", rs.GetNamespace(), "nmae", rs.GetName(), "oref", oref)
+			continue
+		}
+		found = true
+	}
+
+	if !found {
+		l.V(2).Info("Ignoring rs", "ns", rs.GetNamespace(), "name", rs.GetName())
+		return nil
+	}
+
+	svcClusterIpMu.RLock()
+	svcIp := svcClusterIp
+	svcClusterIpMu.RUnlock()
+	if svcIp == "" {
+		s := &corev1.Service{}
+		err := a.Get(ctx, client.ObjectKey{Namespace: svcNamespace, Name: svcName}, s)
+		if err != nil {
+			l.Error(err, "Failed to get service", "name", svcName, "ns", svcNamespace)
+			return err
+		}
+		l.Info("Update Service Cluster IP cache", "name", s.GetName(), "ip", s.Spec.ClusterIP)
+		svcIp = s.Spec.ClusterIP
+	}
+
+	if hostAliasesNeedsPatch(ctx, svcIp, dnsNames, rs.Spec.Template.Spec.HostAliases) {
+		rs.Spec.Template.Spec.HostAliases = append(rs.Spec.Template.Spec.HostAliases, corev1.HostAlias{IP: svcIp, Hostnames: dnsNames})
+		l.Info("Patching rs", "ns", rs.GetNamespace(), "name", rs.GetName(), "hostAliases", rs.Spec.Template.Spec.HostAliases,
+			"dnsNames", dnsNames, "svcIp", svcIp, "targets", tgtDeployments, "svcClusterIp", svcClusterIp)
+	} else {
+		l.Info("Already up-to-date rs", "ns", rs.GetNamespace(), "name", rs.GetName(), "hostAliases", rs.Spec.Template.Spec.HostAliases,
+			"dnsNames", dnsNames, "svcIp", svcIp, "targets", tgtDeployments, "svcClusterIp", svcClusterIp)
+	}
 	return nil
 }
