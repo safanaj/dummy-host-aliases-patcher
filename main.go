@@ -125,7 +125,9 @@ func GetDesiredHostAliases(ctx context.Context, svcIp string, dnsNames []string,
 		for host, _ := range hosts {
 			hostnames = append(hostnames, host)
 		}
-		newHostAliases = append(newHostAliases, corev1.HostAlias{IP: ip, Hostnames: hostnames})
+		if len(hostnames) > 0 {
+			newHostAliases = append(newHostAliases, corev1.HostAlias{IP: ip, Hostnames: hostnames})
+		}
 	}
 	return newHostAliases, needsUpdate
 }
@@ -156,7 +158,7 @@ func doInitialReconcile(ctx context.Context, cl client.Client, api client.Reader
 	svcClusterIp = svc.Spec.ClusterIP
 
 	patches := make(map[*appsv1.Deployment]client.Patch)
-	patch := []byte(`{"metadata":{"annotations":{"host-aliases-patcher": "needed"}}}`)
+	patch := []byte(fmt.Sprintf(`{"metadata":{"annotations":{"host-aliases-patcher": "needed at %s"}}}`, time.Now()))
 
 	for _, d := range deployments {
 		_, needsUpdate := GetDesiredHostAliases(ctx, svcClusterIp, dnsNames, d.Spec.Template.Spec.HostAliases)
@@ -256,7 +258,7 @@ func main() {
 			l := logf.FromContext(ctx).WithName("reconciler")
 			cl := mgr.GetClient()
 
-			l.V(3).Info("Procesing", "req", req)
+			l.V(2).Info("Procesing", "req", req)
 
 			svc := &corev1.Service{}
 			err := cl.Get(ctx, req.NamespacedName, svc)
@@ -280,22 +282,34 @@ func main() {
 			svcClusterIpMu.Lock()
 			defer svcClusterIpMu.Unlock()
 			svcClusterIp = svc.Spec.ClusterIP
-			l.V(2).Info("Service ClusterIP (cache) updated", "svcClusterIp", svcClusterIp, "name", svc.GetName())
+			l.Info("Service ClusterIP (cache) updated", "svcClusterIp", svcClusterIp, "name", svc.GetName())
 
 			if needsNotify {
 				// todo: notify that IP is changed/set
-				l.V(2).Info("Service ClusterIP (cache) update needs notify")
+				l.Info("Service ClusterIP (cache) update needs notify")
 
-				patch := []byte(`{"metadata":{"annotations":{"host-aliases-patcher": "needed"}}}`)
+				patches := make(map[*appsv1.Deployment]client.Patch)
+				patch := []byte(fmt.Sprintf(`{"metadata":{"annotations":{"host-aliases-patcher": "needed at %s"}}}`, time.Now()))
 				for _, tgtName := range tgtDeployments {
 					d := &appsv1.Deployment{}
 					if err := cl.Get(ctx, client.ObjectKey{Namespace: tgtNamespace, Name: tgtName}, d); err != nil {
 						// just skip
 						continue
 					}
-					err := cl.Patch(ctx, d, client.RawPatch(types.StrategicMergePatchType, patch))
-					if err != nil {
-						l.Error(err, "Notifying patch failed on deployment", "ns", d.GetNamespace(), "name", d.GetName())
+					patches[d] = client.RawPatch(types.StrategicMergePatchType, patch)
+				}
+
+				if len(patches) > 0 {
+					if svcClusterIp != "" {
+						for d, rawPatch := range patches {
+							l.Info("Notifying deployment for svc cluster IP update", "ns", d.GetNamespace(), "name", d.GetName())
+							if err := cl.Patch(ctx, d, rawPatch); err != nil {
+								l.Error(err, "Notifying patch failed on deployment", "ns", d.GetNamespace(), "name", d.GetName())
+							}
+						}
+					} else {
+						l.Info("Requeue Service because empty IP", "ns", svc.GetNamespace(), "name", svc.GetName())
+						return reconcile.Result{RequeueAfter: time.Second * 5}, nil
 					}
 				}
 			}
