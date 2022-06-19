@@ -250,11 +250,19 @@ func main() {
 		For(&corev1.Service{}, builder.WithPredicates(predicate.ResourceVersionChangedPredicate{}, predicate.Funcs{
 			CreateFunc: func(evt event.CreateEvent) bool {
 				log.V(4).Info("Event filtering (create)", "evt", evt)
-				return isWatchedService(evt.Object)
+				watched := isWatchedService(evt.Object)
+				if watched {
+					log.Info("Watched service created", "ns", evt.Object.GetNamespace(), "name", evt.Object.GetName())
+				}
+				return watched
 			},
 			UpdateFunc: func(evt event.UpdateEvent) bool {
 				log.V(4).Info("Event filtering (update)", "evt", evt)
-				return isWatchedService(evt.ObjectNew)
+				watched := isWatchedService(evt.ObjectNew)
+				if watched {
+					log.Info("Watched service updated", "ns", evt.ObjectNew.GetNamespace(), "name", evt.ObjectNew.GetName())
+				}
+				return watched
 			},
 		})).
 		Complete(reconcile.Func(func(ctx context.Context, req reconcile.Request) (reconcile.Result, error) {
