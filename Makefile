@@ -43,8 +43,11 @@ static: golang
 		-ldflags "$(LDFLAGS) -X main.version=${VERSION} -X main.progname=${COMPONENT}" \
 		-v -o ${COMPONENT} $(SRCS)
 
-# test:
-# 	$(ENVVAR) GOOS=$(GOOS) $(GO) test -v ./...
+test:
+	$(ENVVAR) GOOS=$(GOOS) $(GO) test -v ./...
+
+ginkgo:
+	$(ENVVAR) GOOS=$(GOOS) ginkgo -v ./...
 
 .dockerignore:
 	echo $(COMPONENT) > .dockerignore

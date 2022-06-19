@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"net/http"
 	"os"
-	"regexp"
+	// "regexp"
 	"sync"
 	"time"
 
@@ -72,119 +72,144 @@ func isWatchedService(o client.Object) bool {
 		objk.Name == svcName)
 }
 
-func findActiveReplicaSetOnDeployment(
-	ctx context.Context,
-	depl *appsv1.Deployment,
-) (string, string) {
-	rsName := ""
-	pthVal := ""
+// func findActiveReplicaSetOnDeployment(
+// 	ctx context.Context,
+// 	depl *appsv1.Deployment,
+// ) (string, string) {
+// 	rsName := ""
+// 	pthVal := ""
 
-	reCreated := regexp.MustCompile(fmt.Sprintf("Created new replica set \"%s-([[:alnum:]]+)\"", depl.GetName()))
-	reInProgress := regexp.MustCompile(fmt.Sprintf("ReplicaSet \"%s-([[:alnum:]]+)\" is progressing.", depl.GetName()))
-	reReady := regexp.MustCompile(fmt.Sprintf("ReplicaSet \"%s-([[:alnum:]]+)\" has successfully progressed.", depl.GetName()))
+// 	reCreated := regexp.MustCompile(fmt.Sprintf("Created new replica set \"%s-([[:alnum:]]+)\"", depl.GetName()))
+// 	reInProgress := regexp.MustCompile(fmt.Sprintf("ReplicaSet \"%s-([[:alnum:]]+)\" is progressing.", depl.GetName()))
+// 	reReady := regexp.MustCompile(fmt.Sprintf("ReplicaSet \"%s-([[:alnum:]]+)\" has successfully progressed.", depl.GetName()))
 
-	for _, cond := range depl.Status.Conditions {
-		if cond.Status != corev1.ConditionTrue && cond.Type != appsv1.DeploymentProgressing {
-			continue
-		}
-		m := []string{}
-		if cond.Reason == "NewReplicaSetCreated" {
-			m = reCreated.FindStringSubmatch(cond.Message)
-		} else if cond.Reason == "NewReplicaSetUpdated" {
-			m = reInProgress.FindStringSubmatch(cond.Message)
-		} else if cond.Reason == "NewReplicaSetAvailable" {
-			m = reReady.FindStringSubmatch(cond.Message)
-		}
-		if len(m) < 2 {
-			continue
-		}
-		rsName = fmt.Sprintf("%s-%s", depl.GetName(), m[1])
-		pthVal = m[1]
-		break
-	}
-	return rsName, pthVal
-}
+// 	for _, cond := range depl.Status.Conditions {
+// 		if cond.Status != corev1.ConditionTrue && cond.Type != appsv1.DeploymentProgressing {
+// 			continue
+// 		}
+// 		m := []string{}
+// 		if cond.Reason == "NewReplicaSetCreated" {
+// 			m = reCreated.FindStringSubmatch(cond.Message)
+// 		} else if cond.Reason == "NewReplicaSetUpdated" {
+// 			m = reInProgress.FindStringSubmatch(cond.Message)
+// 		} else if cond.Reason == "NewReplicaSetAvailable" {
+// 			m = reReady.FindStringSubmatch(cond.Message)
+// 		}
+// 		if len(m) < 2 {
+// 			continue
+// 		}
+// 		rsName = fmt.Sprintf("%s-%s", depl.GetName(), m[1])
+// 		pthVal = m[1]
+// 		break
+// 	}
+// 	return rsName, pthVal
+// }
 
-func findPodsAndControllers(
-	ctx context.Context,
-	cl client.Reader,
-	deplKey client.ObjectKey,
-) (*appsv1.Deployment, *appsv1.ReplicaSet, []*corev1.Pod, error) {
-	l := logf.FromContext(ctx).WithName("findPodsAndControllers")
+// func findPodsAndControllers(
+// 	ctx context.Context,
+// 	cl client.Reader,
+// 	deplKey client.ObjectKey,
+// ) (*appsv1.Deployment, *appsv1.ReplicaSet, []*corev1.Pod, error) {
+// 	l := logf.FromContext(ctx).WithName("findPodsAndControllers")
 
-	depl := &appsv1.Deployment{}
-	err := cl.Get(ctx, deplKey, depl)
-	if err != nil {
-		return nil, nil, nil, err
-	}
+// 	depl := &appsv1.Deployment{}
+// 	err := cl.Get(ctx, deplKey, depl)
+// 	if err != nil {
+// 		return nil, nil, nil, err
+// 	}
 
-	rsName, pthVal := findActiveReplicaSetOnDeployment(ctx, depl)
+// 	rsName, pthVal := findActiveReplicaSetOnDeployment(ctx, depl)
 
-	if rsName == "" {
-		return depl, nil, nil, nil
-	}
+// 	if rsName == "" {
+// 		return depl, nil, nil, nil
+// 	}
 
-	rs := &appsv1.ReplicaSet{}
-	err = cl.Get(ctx, client.ObjectKey{Namespace: deplKey.Namespace, Name: rsName}, rs)
-	if err != nil {
-		return depl, nil, nil, err
-	}
+// 	rs := &appsv1.ReplicaSet{}
+// 	err = cl.Get(ctx, client.ObjectKey{Namespace: deplKey.Namespace, Name: rsName}, rs)
+// 	if err != nil {
+// 		return depl, nil, nil, err
+// 	}
 
-	podsList := &corev1.PodList{}
-	if pthVal != rs.GetLabels()["pod-template-hash"] {
-		l.Info(fmt.Sprintf("pod-template-hash mismatch, on deploy was %s, on replicaSet is %s", pthVal, rs.GetLabels()["pod-template-hash"]))
-	}
-	ml := client.MatchingLabels{"pod-template-hash": rs.GetLabels()["pod-template-hash"]}
-	err = cl.List(ctx, podsList, client.InNamespace(deplKey.Namespace), ml)
-	if err != nil {
-		return depl, rs, nil, err
-	}
-	pods := []*corev1.Pod{}
-	for i, _ := range podsList.Items {
-		pod := &podsList.Items[i]
-		for _, oref := range pod.GetOwnerReferences() {
-			if oref.UID != rs.GetUID() {
-				continue
-			}
-			// pods = append(pods, pod.DeepCopy())
-			pods = append(pods, pod)
-		}
-	}
-	return depl, rs, pods, nil
-}
+// 	podsList := &corev1.PodList{}
+// 	if pthVal != rs.GetLabels()["pod-template-hash"] {
+// 		l.Info(fmt.Sprintf("pod-template-hash mismatch, on deploy was %s, on replicaSet is %s", pthVal, rs.GetLabels()["pod-template-hash"]))
+// 	}
+// 	ml := client.MatchingLabels{"pod-template-hash": rs.GetLabels()["pod-template-hash"]}
+// 	err = cl.List(ctx, podsList, client.InNamespace(deplKey.Namespace), ml)
+// 	if err != nil {
+// 		return depl, rs, nil, err
+// 	}
+// 	pods := []*corev1.Pod{}
+// 	for i, _ := range podsList.Items {
+// 		pod := &podsList.Items[i]
+// 		for _, oref := range pod.GetOwnerReferences() {
+// 			if oref.UID != rs.GetUID() {
+// 				continue
+// 			}
+// 			// pods = append(pods, pod.DeepCopy())
+// 			pods = append(pods, pod)
+// 		}
+// 	}
+// 	return depl, rs, pods, nil
+// }
 
-func hostAliasesNeedsPatch(ctx context.Context, svcIp string, dnsNames []string, hostAliases []corev1.HostAlias) bool {
+// exported just for testing with ginkgo
+func GetDesiredHostAliases(ctx context.Context, svcIp string, dnsNames []string, hostAliases []corev1.HostAlias) ([]corev1.HostAlias, bool) {
 	l := logf.FromContext(ctx).WithName("needs-patch")
+
 	if len(dnsNames) == 0 || svcIp == "" {
 		l.V(3).Info("Skipping check", "dnsNames", dnsNames, "svcIp", svcIp)
-		return false
+		return hostAliases, false
 	}
-	if len(hostAliases) == 0 {
-		l.V(3).Info("Needs patch because no hostAliases")
-		return true
+
+	needsUpdate := false
+	newHostAliases := []corev1.HostAlias{}
+	dnsNamesMap := make(map[string]struct{})
+	aliases := make(map[string]map[string]struct{})
+
+	for _, dnsName := range dnsNames {
+		dnsNamesMap[dnsName] = struct{}{}
 	}
-	found := false
-	for _, hostAlias := range hostAliases {
-		if hostAlias.IP != svcIp {
-			continue
+
+	// keep current hostAliases
+	for _, ha := range hostAliases {
+		if _, ok := aliases[ha.IP]; !ok {
+			aliases[ha.IP] = make(map[string]struct{})
 		}
-		hnMap := make(map[string]struct{})
-		for _, hn := range hostAlias.Hostnames {
-			hnMap[hn] = struct{}{}
-		}
-		for _, n := range dnsNames {
-			if _, ok := hnMap[n]; !ok {
-				found = false
-				break
+		for _, hn := range ha.Hostnames {
+			// skip matching desired dns names, we will add them later
+			// in this way we manage wrong IPs associated with dns names, cleaning wrong entries
+			if _, skipIt := dnsNamesMap[hn]; !skipIt || ha.IP == svcIp {
+				aliases[ha.IP][hn] = struct{}{}
+			} else {
+				needsUpdate = true
 			}
-			l.V(4).Info("No patch needed, because all hostAliases were found")
-			found = true
 		}
 	}
-	if !found {
-		return true
+
+	if _, ok := aliases[svcIp]; !ok {
+		aliases[svcIp] = make(map[string]struct{})
+		needsUpdate = true
 	}
-	return false
+
+	lenBeforeDnsNames := len(aliases[svcIp])
+
+	for dnsName, _ := range dnsNamesMap {
+		aliases[svcIp][dnsName] = struct{}{}
+	}
+
+	if !needsUpdate {
+		needsUpdate = len(aliases[svcIp]) != lenBeforeDnsNames
+	}
+
+	for ip, hosts := range aliases {
+		hostnames := make([]string, 0, len(hosts))
+		for host, _ := range hosts {
+			hostnames = append(hostnames, host)
+		}
+		newHostAliases = append(newHostAliases, corev1.HostAlias{IP: ip, Hostnames: hostnames})
+	}
+	return newHostAliases, needsUpdate
 }
 
 func doInitialReconcile(ctx context.Context, cl client.Client, api client.Reader) {
@@ -197,41 +222,63 @@ func doInitialReconcile(ctx context.Context, cl client.Client, api client.Reader
 		return
 	}
 
-	findings := make(map[string]struct {
-		d    *appsv1.Deployment
-		rs   *appsv1.ReplicaSet
-		pods []*corev1.Pod
-	})
+	// findings := make(map[string]struct {
+	// 	d    *appsv1.Deployment
+	// 	rs   *appsv1.ReplicaSet
+	// 	pods []*corev1.Pod
+	// })
 
+	deployments := []*appsv1.Deployment{}
 	for _, tgtName := range tgtDeployments {
-		depl, rs, pods, err := findPodsAndControllers(ctx, api, client.ObjectKey{Namespace: tgtNamespace, Name: tgtName})
-		if err != nil {
-			l.Error(err, "Failed to get target deployment", "name", tgtName, "ns", tgtNamespace)
-			continue
-		}
+
+		// depl, rs, pods, err := findPodsAndControllers(ctx, api, client.ObjectKey{Namespace: tgtNamespace, Name: tgtName})
+		// if err != nil {
+		// 	l.Error(err, "Failed to get target deployment", "name", tgtName, "ns", tgtNamespace)
+		// 	continue
+		// }
 		// if pods == nil {
 		// 	l.Info("No pods found for target deployment", "name", tgtName, "ns", tgtNamespace)
 		// 	continue
 		// }
 
-		findings[fmt.Sprintf("%s/%s", depl.GetNamespace(), depl.GetName())] = struct {
-			d    *appsv1.Deployment
-			rs   *appsv1.ReplicaSet
-			pods []*corev1.Pod
-		}{d: depl, rs: rs, pods: pods}
+		// findings[fmt.Sprintf("%s/%s", depl.GetNamespace(), depl.GetName())] = struct {
+		// 	d    *appsv1.Deployment
+		// 	rs   *appsv1.ReplicaSet
+		// 	pods []*corev1.Pod
+		// }{d: depl, rs: rs, pods: pods}
+
+		depl := &appsv1.Deployment{}
+		err := api.Get(ctx, client.ObjectKey{Namespace: tgtNamespace, Name: tgtName}, depl)
+		if err != nil {
+			l.Error(err, "Failed to get deployment", "name", svcName, "ns", svcNamespace)
+			continue
+		}
+		deployments = append(deployments, depl)
 	}
 
 	svcClusterIpMu.Lock()
 	defer svcClusterIpMu.Unlock()
 	svcClusterIp = svc.Spec.ClusterIP
+
 	patches := make(map[*appsv1.Deployment]client.Patch)
 	patch := []byte(`{"metadata":{"annotations":{"host-aliases-patcher": "needed"}}}`)
-	for _, f := range findings {
-		if hostAliasesNeedsPatch(ctx, svcClusterIp, dnsNames, f.d.Spec.Template.Spec.HostAliases) {
+
+	// for _, f := range findings {
+	// 	_, needsUpdate := GetDesiredHostAliases(ctx, svcClusterIp, dnsNames, f.d.Spec.Template.Spec.HostAliases)
+	// 	if needsUpdate {
+	// 		// do update using a delayed annotation on deployment
+	// 		patches[f.d] = client.RawPatch(types.StrategicMergePatchType, patch)
+	// 	}
+	// }
+
+	for _, d := range deployments {
+		_, needsUpdate := GetDesiredHostAliases(ctx, svcClusterIp, dnsNames, d.Spec.Template.Spec.HostAliases)
+		if needsUpdate {
 			// do update using a delayed annotation on deployment
-			patches[f.d] = client.RawPatch(types.StrategicMergePatchType, patch)
+			patches[d] = client.RawPatch(types.StrategicMergePatchType, patch)
 		}
 	}
+
 	if len(patches) > 0 {
 		time.AfterFunc(time.Second*15, func() {
 			for d, rawPatch := range patches {
@@ -323,11 +370,11 @@ func main() {
 		ControllerManagedBy(mgr).
 		For(&corev1.Service{}, builder.WithPredicates(predicate.ResourceVersionChangedPredicate{}, predicate.Funcs{
 			CreateFunc: func(evt event.CreateEvent) bool {
-				log.V(3).Info("Event filtering (create)", "evt", evt)
+				log.V(4).Info("Event filtering (create)", "evt", evt)
 				return isWatchedService(evt.Object)
 			},
 			UpdateFunc: func(evt event.UpdateEvent) bool {
-				log.V(3).Info("Event filtering (update)", "evt", evt)
+				log.V(4).Info("Event filtering (update)", "evt", evt)
 				return isWatchedService(evt.ObjectNew)
 			},
 		})).
@@ -459,10 +506,13 @@ func (a *hostAliasesDefaulter) processDeploy(ctx context.Context, d *appsv1.Depl
 		svcIp = s.Spec.ClusterIP
 	}
 
-	if hostAliasesNeedsPatch(ctx, svcIp, dnsNames, d.Spec.Template.Spec.HostAliases) {
-		d.Spec.Template.Spec.HostAliases = append(d.Spec.Template.Spec.HostAliases, corev1.HostAlias{IP: svcIp, Hostnames: dnsNames})
+	newHostAliases, needsUpdate := GetDesiredHostAliases(ctx, svcIp, dnsNames, d.Spec.Template.Spec.HostAliases)
+	if needsUpdate {
+		d.Spec.Template.Spec.HostAliases = newHostAliases
 		l.Info("Patching Deployment", "ns", d.GetNamespace(), "name", d.GetName(), "hostAliases", d.Spec.Template.Spec.HostAliases,
 			"dnsNames", dnsNames, "svcIp", svcIp, "targets", tgtDeployments, "svcClusterIp", svcClusterIp)
+
+		// we changed the deployment, just annotate it
 		if d.ObjectMeta.Annotations == nil {
 			d.ObjectMeta.Annotations = make(map[string]string)
 		}
@@ -479,5 +529,6 @@ func (a *hostAliasesDefaulter) processDeploy(ctx context.Context, d *appsv1.Depl
 		l.Info("Already up-to-date Deployment", "ns", d.GetNamespace(), "name", d.GetName(), "hostAliases", d.Spec.Template.Spec.HostAliases,
 			"dnsNames", dnsNames, "svcIp", svcIp, "targets", tgtDeployments, "svcClusterIp", svcClusterIp)
 	}
+
 	return nil
 }
