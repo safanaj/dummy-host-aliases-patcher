@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"net/http"
 	"os"
-	// "regexp"
 	"sync"
 	"time"
 
@@ -71,87 +70,6 @@ func isWatchedService(o client.Object) bool {
 		objk.Namespace == svcNamespace &&
 		objk.Name == svcName)
 }
-
-// func findActiveReplicaSetOnDeployment(
-// 	ctx context.Context,
-// 	depl *appsv1.Deployment,
-// ) (string, string) {
-// 	rsName := ""
-// 	pthVal := ""
-
-// 	reCreated := regexp.MustCompile(fmt.Sprintf("Created new replica set \"%s-([[:alnum:]]+)\"", depl.GetName()))
-// 	reInProgress := regexp.MustCompile(fmt.Sprintf("ReplicaSet \"%s-([[:alnum:]]+)\" is progressing.", depl.GetName()))
-// 	reReady := regexp.MustCompile(fmt.Sprintf("ReplicaSet \"%s-([[:alnum:]]+)\" has successfully progressed.", depl.GetName()))
-
-// 	for _, cond := range depl.Status.Conditions {
-// 		if cond.Status != corev1.ConditionTrue && cond.Type != appsv1.DeploymentProgressing {
-// 			continue
-// 		}
-// 		m := []string{}
-// 		if cond.Reason == "NewReplicaSetCreated" {
-// 			m = reCreated.FindStringSubmatch(cond.Message)
-// 		} else if cond.Reason == "NewReplicaSetUpdated" {
-// 			m = reInProgress.FindStringSubmatch(cond.Message)
-// 		} else if cond.Reason == "NewReplicaSetAvailable" {
-// 			m = reReady.FindStringSubmatch(cond.Message)
-// 		}
-// 		if len(m) < 2 {
-// 			continue
-// 		}
-// 		rsName = fmt.Sprintf("%s-%s", depl.GetName(), m[1])
-// 		pthVal = m[1]
-// 		break
-// 	}
-// 	return rsName, pthVal
-// }
-
-// func findPodsAndControllers(
-// 	ctx context.Context,
-// 	cl client.Reader,
-// 	deplKey client.ObjectKey,
-// ) (*appsv1.Deployment, *appsv1.ReplicaSet, []*corev1.Pod, error) {
-// 	l := logf.FromContext(ctx).WithName("findPodsAndControllers")
-
-// 	depl := &appsv1.Deployment{}
-// 	err := cl.Get(ctx, deplKey, depl)
-// 	if err != nil {
-// 		return nil, nil, nil, err
-// 	}
-
-// 	rsName, pthVal := findActiveReplicaSetOnDeployment(ctx, depl)
-
-// 	if rsName == "" {
-// 		return depl, nil, nil, nil
-// 	}
-
-// 	rs := &appsv1.ReplicaSet{}
-// 	err = cl.Get(ctx, client.ObjectKey{Namespace: deplKey.Namespace, Name: rsName}, rs)
-// 	if err != nil {
-// 		return depl, nil, nil, err
-// 	}
-
-// 	podsList := &corev1.PodList{}
-// 	if pthVal != rs.GetLabels()["pod-template-hash"] {
-// 		l.Info(fmt.Sprintf("pod-template-hash mismatch, on deploy was %s, on replicaSet is %s", pthVal, rs.GetLabels()["pod-template-hash"]))
-// 	}
-// 	ml := client.MatchingLabels{"pod-template-hash": rs.GetLabels()["pod-template-hash"]}
-// 	err = cl.List(ctx, podsList, client.InNamespace(deplKey.Namespace), ml)
-// 	if err != nil {
-// 		return depl, rs, nil, err
-// 	}
-// 	pods := []*corev1.Pod{}
-// 	for i, _ := range podsList.Items {
-// 		pod := &podsList.Items[i]
-// 		for _, oref := range pod.GetOwnerReferences() {
-// 			if oref.UID != rs.GetUID() {
-// 				continue
-// 			}
-// 			// pods = append(pods, pod.DeepCopy())
-// 			pods = append(pods, pod)
-// 		}
-// 	}
-// 	return depl, rs, pods, nil
-// }
 
 // exported just for testing with ginkgo
 func GetDesiredHostAliases(ctx context.Context, svcIp string, dnsNames []string, hostAliases []corev1.HostAlias) ([]corev1.HostAlias, bool) {
@@ -222,31 +140,8 @@ func doInitialReconcile(ctx context.Context, cl client.Client, api client.Reader
 		return
 	}
 
-	// findings := make(map[string]struct {
-	// 	d    *appsv1.Deployment
-	// 	rs   *appsv1.ReplicaSet
-	// 	pods []*corev1.Pod
-	// })
-
 	deployments := []*appsv1.Deployment{}
 	for _, tgtName := range tgtDeployments {
-
-		// depl, rs, pods, err := findPodsAndControllers(ctx, api, client.ObjectKey{Namespace: tgtNamespace, Name: tgtName})
-		// if err != nil {
-		// 	l.Error(err, "Failed to get target deployment", "name", tgtName, "ns", tgtNamespace)
-		// 	continue
-		// }
-		// if pods == nil {
-		// 	l.Info("No pods found for target deployment", "name", tgtName, "ns", tgtNamespace)
-		// 	continue
-		// }
-
-		// findings[fmt.Sprintf("%s/%s", depl.GetNamespace(), depl.GetName())] = struct {
-		// 	d    *appsv1.Deployment
-		// 	rs   *appsv1.ReplicaSet
-		// 	pods []*corev1.Pod
-		// }{d: depl, rs: rs, pods: pods}
-
 		depl := &appsv1.Deployment{}
 		err := api.Get(ctx, client.ObjectKey{Namespace: tgtNamespace, Name: tgtName}, depl)
 		if err != nil {
@@ -262,14 +157,6 @@ func doInitialReconcile(ctx context.Context, cl client.Client, api client.Reader
 
 	patches := make(map[*appsv1.Deployment]client.Patch)
 	patch := []byte(`{"metadata":{"annotations":{"host-aliases-patcher": "needed"}}}`)
-
-	// for _, f := range findings {
-	// 	_, needsUpdate := GetDesiredHostAliases(ctx, svcClusterIp, dnsNames, f.d.Spec.Template.Spec.HostAliases)
-	// 	if needsUpdate {
-	// 		// do update using a delayed annotation on deployment
-	// 		patches[f.d] = client.RawPatch(types.StrategicMergePatchType, patch)
-	// 	}
-	// }
 
 	for _, d := range deployments {
 		_, needsUpdate := GetDesiredHostAliases(ctx, svcClusterIp, dnsNames, d.Spec.Template.Spec.HostAliases)
@@ -353,19 +240,6 @@ func main() {
 		return nil
 	})
 
-	// initialize Service Cluster IP cache
-	{
-		svc := &corev1.Service{}
-		err := mgr.GetAPIReader().Get(mainCtx, client.ObjectKey{Namespace: svcNamespace, Name: svcName}, svc)
-		if err != nil {
-			log.Error(err, "Failed to get service", "name", svcName, "ns", svcNamespace)
-		}
-		svcClusterIpMu.Lock()
-		svcClusterIp = svc.Spec.ClusterIP
-		svcClusterIpMu.Unlock()
-		log.V(2).Info("Service Cluster IP initialized", "name", svc.GetName(), "ip", svcClusterIp)
-	}
-
 	err = builder.
 		ControllerManagedBy(mgr).
 		For(&corev1.Service{}, builder.WithPredicates(predicate.ResourceVersionChangedPredicate{}, predicate.Funcs{
@@ -378,16 +252,6 @@ func main() {
 				return isWatchedService(evt.ObjectNew)
 			},
 		})).
-		// WithEventFilter(predicate.And(predicate.ResourceVersionChangedPredicate{}, predicate.Funcs{
-		// 	CreateFunc: func(evt event.CreateEvent) bool {
-		// 		log.V(3).Info("Event filtering (create)", "evt", evt)
-		// 		return isWatchedService(evt.Object)
-		// 	},
-		// 	UpdateFunc: func(evt event.UpdateEvent) bool {
-		// 		log.V(3).Info("Event filtering (update)", "evt", evt)
-		// 		return isWatchedService(evt.ObjectNew)
-		// 	},
-		// })).
 		Complete(reconcile.Func(func(ctx context.Context, req reconcile.Request) (reconcile.Result, error) {
 			l := logf.FromContext(ctx).WithName("reconciler")
 			cl := mgr.GetClient()
@@ -417,6 +281,7 @@ func main() {
 			defer svcClusterIpMu.Unlock()
 			svcClusterIp = svc.Spec.ClusterIP
 			l.V(2).Info("Service ClusterIP (cache) updated", "svcClusterIp", svcClusterIp, "name", svc.GetName())
+
 			if needsNotify {
 				// todo: notify that IP is changed/set
 				l.V(2).Info("Service ClusterIP (cache) update needs notify")
@@ -502,7 +367,7 @@ func (a *hostAliasesDefaulter) processDeploy(ctx context.Context, d *appsv1.Depl
 			l.Error(err, "Failed to get service", "name", svcName, "ns", svcNamespace)
 			return err
 		}
-		l.Info("Update Service Cluster IP cache", "name", s.GetName(), "ip", s.Spec.ClusterIP)
+		l.Info("Service Cluster IP cache not up-to-date, was empty", "name", s.GetName(), "ip", s.Spec.ClusterIP)
 		svcIp = s.Spec.ClusterIP
 	}
 
