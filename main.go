@@ -127,6 +127,9 @@ func GetDesiredHostAliases(ctx context.Context, svcIp string, dnsNames []string,
 		}
 		if len(hostnames) > 0 {
 			newHostAliases = append(newHostAliases, corev1.HostAlias{IP: ip, Hostnames: hostnames})
+		} else {
+			// needs update for skipped entry
+			needsUpdate = true
 		}
 	}
 	return newHostAliases, needsUpdate
