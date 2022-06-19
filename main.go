@@ -321,11 +321,7 @@ func main() {
 
 	err = builder.
 		ControllerManagedBy(mgr).
-		For(&corev1.Service{}).
-		For(&corev1.Pod{}).
-		For(&appsv1.ReplicaSet{}).
-		For(&appsv1.Deployment{}).
-		WithEventFilter(predicate.And(predicate.ResourceVersionChangedPredicate{}, predicate.Funcs{
+		For(&corev1.Service{}, builder.WithPredicates(predicate.ResourceVersionChangedPredicate{}, predicate.Funcs{
 			CreateFunc: func(evt event.CreateEvent) bool {
 				log.V(3).Info("Event filtering (create)", "evt", evt)
 				return isWatchedService(evt.Object)
@@ -335,6 +331,16 @@ func main() {
 				return isWatchedService(evt.ObjectNew)
 			},
 		})).
+		// WithEventFilter(predicate.And(predicate.ResourceVersionChangedPredicate{}, predicate.Funcs{
+		// 	CreateFunc: func(evt event.CreateEvent) bool {
+		// 		log.V(3).Info("Event filtering (create)", "evt", evt)
+		// 		return isWatchedService(evt.Object)
+		// 	},
+		// 	UpdateFunc: func(evt event.UpdateEvent) bool {
+		// 		log.V(3).Info("Event filtering (update)", "evt", evt)
+		// 		return isWatchedService(evt.ObjectNew)
+		// 	},
+		// })).
 		Complete(reconcile.Func(func(ctx context.Context, req reconcile.Request) (reconcile.Result, error) {
 			l := logf.FromContext(ctx).WithName("reconciler")
 			cl := mgr.GetClient()
