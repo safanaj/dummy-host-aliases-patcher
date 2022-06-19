@@ -312,12 +312,14 @@ func main() {
 
 				if len(patches) > 0 {
 					if svcClusterIp != "" {
-						for d, rawPatch := range patches {
-							l.Info("Notifying deployment for svc cluster IP update", "ns", d.GetNamespace(), "name", d.GetName())
-							if err := cl.Patch(ctx, d, rawPatch); err != nil {
-								l.Error(err, "Notifying patch failed on deployment", "ns", d.GetNamespace(), "name", d.GetName())
+						time.AfterFunc(time.Second*15, func() {
+							for d, rawPatch := range patches {
+								l.Info("Notifying deployment for svc cluster IP update", "ns", d.GetNamespace(), "name", d.GetName())
+								if err := cl.Patch(ctx, d, rawPatch); err != nil {
+									l.Error(err, "Delayed Notifying patch failed on deployment", "ns", d.GetNamespace(), "name", d.GetName())
+								}
 							}
-						}
+						})
 					} else {
 						l.Info("Requeue Service because empty IP", "ns", svc.GetNamespace(), "name", svc.GetName())
 						return reconcile.Result{RequeueAfter: time.Second * 5}, nil
