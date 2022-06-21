@@ -221,6 +221,8 @@ func main() {
 	mgrOpts := manager.Options{Logger: log.WithName("mgr")}
 	if tgtNamespace == svcNamespace {
 		mgrOpts.Namespace = tgtNamespace
+	} else {
+		mgrOpts.NewCache = cache.MultiNamespacedCacheBuilder([]string{svcNamespace, tgtNamespace})
 	}
 
 	mgr, err := manager.New(config.GetConfigOrDie(), mgrOpts)
@@ -247,7 +249,7 @@ func main() {
 
 	err = builder.
 		ControllerManagedBy(mgr).
-		For(&corev1.Service{}, builder.WithPredicates(predicate.ResourceVersionChangedPredicate{}, predicate.Funcs{
+		For(&corev1.Service{}, builder.WithPredicates(predicate.Funcs{
 			CreateFunc: func(evt event.CreateEvent) bool {
 				log.V(4).Info("Event filtering (create)", "evt", evt)
 				watched := isWatchedService(evt.Object)
